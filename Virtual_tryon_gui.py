@@ -7,14 +7,14 @@ from ttkbootstrap.constants import *
 from tkinter import filedialog
 from PIL import Image, ImageTk
 import cv2
+import threading
+
 from utils.overlay import overlay_tshirt
 from ultralytics import YOLO
-import threading
-import os
-import sys
 
-# Ensure we can import from utils
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+import mediapipe as mp
+mp_pose = mp.solutions.pose
+pose = mp_pose.Pose()
 
 class VirtualTryOnApp:
     def __init__(self, root):
@@ -86,12 +86,33 @@ class VirtualTryOnApp:
             frame = cv2.flip(frame, 1)
 
             results = self.model(frame)[0]
+            person_detected = False
             for det in results.boxes.data:
                 x1, y1, x2, y2, conf, cls = det
                 if int(cls) == 0:  # Person class
-                    if self.tshirt_img is not None:
-                        frame = overlay_tshirt(frame, (int(x1), int(y1), int(x2), int(y2)), self.tshirt_img)
+                    person_detected = True
                     break
+
+            if person_detected and self.tshirt_img is not None:
+                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                pose_results = pose.process(frame_rgb)
+
+                if pose_results.pose_landmarks:
+                    landmarks = pose_results.pose_landmarks.landmark
+
+                    left_shoulder = landmarks[mp_pose.PoseLandmark.LEFT_SHOULDER]
+                    right_shoulder = landmarks[mp_pose.PoseLandmark.RIGHT_SHOULDER]
+
+                    left_coords = (
+                        int(left_shoulder.x * frame.shape[1]),
+                        int(left_shoulder.y * frame.shape[0])
+                    )
+                    right_coords = (
+                        int(right_shoulder.x * frame.shape[1]),
+                        int(right_shoulder.y * frame.shape[0])
+                    )
+
+                    frame = overlay_tshirt(frame, left_coords, right_coords, self.tshirt_img)
 
             frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             img_pil = Image.fromarray(frame_rgb)
@@ -100,7 +121,7 @@ class VirtualTryOnApp:
             self.video_label.config(image=imgtk)
 
 if __name__ == "__main__":
-    app = ttk.Window(themename="superhero")  # Try other themes like "flatly", "morph", "cosmo"
+    app = ttk.Window(themename="superhero")
     app.iconbitmap(default=None)
     VirtualTryOnApp(app)
     app.mainloop()
